@@ -91,6 +91,7 @@ fn test_task3_storage_integration() {
     storage.put(b"1", b"233").unwrap();
     storage.put(b"2", b"2333").unwrap();
     storage.put(b"3", b"23333").unwrap();
+    println!("Here1");
     storage
         .force_freeze_memtable(&storage.state_lock.lock())
         .unwrap();
@@ -121,6 +122,11 @@ fn test_task3_freeze_on_capacity() {
     for _ in 0..1000 {
         storage.put(b"1", b"2333").unwrap();
     }
+    println!(
+        "{}:{}",
+        storage.state.read().memtable.approximate_size(),
+        storage.options.target_sst_size
+    );
     let num_imm_memtables = storage.state.read().imm_memtables.len();
     assert!(num_imm_memtables >= 1, "no memtable frozen?");
     for _ in 0..1000 {
@@ -158,5 +164,6 @@ fn test_task4_storage_integration() {
     assert_eq!(&storage.get(b"1").unwrap().unwrap()[..], b"233333");
     assert_eq!(&storage.get(b"2").unwrap(), &None);
     assert_eq!(&storage.get(b"3").unwrap().unwrap()[..], b"233333");
+    println!("hello");
     assert_eq!(&storage.get(b"4").unwrap().unwrap()[..], b"23333");
 }
