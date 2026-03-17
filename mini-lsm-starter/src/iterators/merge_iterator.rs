@@ -19,6 +19,7 @@ use std::cmp::{self};
 use std::collections::BinaryHeap;
 
 use anyhow::Result;
+use bytes::Bytes;
 
 use crate::key::KeySlice;
 
@@ -59,7 +60,19 @@ pub struct MergeIterator<I: StorageIterator> {
 
 impl<I: StorageIterator> MergeIterator<I> {
     pub fn create(iters: Vec<Box<I>>) -> Self {
-        unimplemented!()
+        let mut binary_heap = BinaryHeap::new();
+        for (index, iter) in iters.into_iter().enumerate() {
+            if iter.is_valid() {
+                binary_heap.push(HeapWrapper(index, iter));
+            }
+        }
+
+        // Pre-position at the smallest key so key()/value()/is_valid() work before first next().
+        let current = binary_heap.pop();
+        Self {
+            iters: binary_heap,
+            current,
+        }
     }
 }
 
@@ -69,18 +82,58 @@ impl<I: 'static + for<'a> StorageIterator<KeyType<'a> = KeySlice<'a>>> StorageIt
     type KeyType<'a> = KeySlice<'a>;
 
     fn key(&self) -> KeySlice<'_> {
-        unimplemented!()
+        if let Some(curr) = &self.current {
+            curr.1.key()
+        } else {
+            KeySlice::from_slice(&[])
+        }
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        if let Some(curr) = &self.current {
+            curr.1.value()
+        } else {
+            &[]
+        }
     }
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.current.is_some()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        // Remember the key we just output (for skipping duplicates).
+        let prev_key: Bytes = self
+            .current
+            .as_ref()
+            .map(|c| Bytes::copy_from_slice(c.1.key().raw_ref()))
+            .unwrap_or_default();
+
+        // Advance the iterator we were currently showing.
+        if let Some(mut curr) = self.current.take() {
+            curr.1.next()?;
+            if curr.1.is_valid() {
+                self.iters.push(curr);
+            }
+        }
+
+        // Skip any heap top that has the same key we just output (duplicate key).
+        loop {
+            let mut w = match self.iters.pop() {
+                Some(w) => w,
+                None => break,
+            };
+            if w.1.key().raw_ref() == prev_key.as_ref() {
+                w.1.next()?;
+                if w.1.is_valid() {
+                    self.iters.push(w);
+                }
+            } else if w.1.is_valid() {
+                self.current = Some(w);
+                return Ok(());
+            }
+        }
+        self.current = None;
+        Ok(())
     }
 }
