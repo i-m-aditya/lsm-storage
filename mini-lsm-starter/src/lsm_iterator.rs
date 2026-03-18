@@ -31,7 +31,14 @@ pub struct LsmIterator {
 
 impl LsmIterator {
     pub(crate) fn new(iter: LsmIteratorInner) -> Result<Self> {
-        Ok(Self { inner: iter })
+        let mut lsm_iter = Self { inner: iter };
+
+        // Skip initial tombstones
+        while lsm_iter.inner.is_valid() && lsm_iter.inner.value().is_empty() {
+            lsm_iter.inner.next()?;
+        }
+
+        Ok(lsm_iter)
     }
 }
 
@@ -39,19 +46,26 @@ impl StorageIterator for LsmIterator {
     type KeyType<'a> = &'a [u8];
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        self.inner.is_valid()
     }
 
     fn key(&self) -> &[u8] {
-        unimplemented!()
+        self.inner.key().raw_ref()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.inner.value()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        self.inner.next()?;
+
+        // Skip tombstones
+        while self.inner.is_valid() && self.inner.value().is_empty() {
+            self.inner.next()?;
+        }
+
+        Ok(())
     }
 }
 
@@ -79,18 +93,27 @@ impl<I: StorageIterator> StorageIterator for FusedIterator<I> {
         Self: 'a;
 
     fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.has_errored && self.iter.is_valid()
     }
 
     fn key(&self) -> Self::KeyType<'_> {
-        unimplemented!()
+        self.iter.key()
     }
 
     fn value(&self) -> &[u8] {
-        unimplemented!()
+        self.iter.value()
     }
 
     fn next(&mut self) -> Result<()> {
-        unimplemented!()
+        if self.has_errored {
+            return Err(anyhow::anyhow!("iterator has previously errored"));
+        }
+        match self.iter.next() {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                self.has_errored = true;
+                Err(e)
+            }
+        }
     }
 }
