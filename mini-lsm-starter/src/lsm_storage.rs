@@ -395,18 +395,24 @@ impl LsmStorageInner {
         lower: Bound<&[u8]>,
         upper: Bound<&[u8]>,
     ) -> Result<FusedIterator<LsmIterator>> {
-        let mut iterators = Vec::new();
+        let state = self.state.read();
 
-        iterators.push(Box::new(self.state.read().memtable.scan(lower, upper)));
+        let mut iterators: Vec<Box<MemTableIterator>> = Vec::new();
 
-        for iterator in &self.state.read().imm_memtables {
-            iterators.push(Box::new(iterator.scan(lower, upper)));
-        }
+        // Add current memtable
+        iterators.push(Box::new(state.memtable.scan(lower, upper)));
+
+        // Add immutable memtables
+        iterators.extend(
+            state
+                .imm_memtables
+                .iter()
+                .map(|memtable| Box::new(memtable.scan(lower, upper))),
+        );
+
         let merge_iter = MergeIterator::create(iterators);
-
         let lsm_iter = LsmIterator::new(merge_iter)?;
-        let fused_iterators = FusedIterator::new(lsm_iter);
 
-        Ok(fused_iterators)
+        Ok(FusedIterator::new(lsm_iter))
     }
 }
