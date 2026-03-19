@@ -32,11 +32,44 @@ impl Block {
     /// Encode the internal data to the data layout illustrated in the course
     /// Note: You may want to recheck if any of the expected field is missing from your output
     pub fn encode(&self) -> Bytes {
-        unimplemented!()
+        let mut encoded = Vec::with_capacity(self.data.len() + self.offsets.len() + 1);
+        encoded.extend_from_slice(self.data.as_ref());
+
+        for offset in &self.offsets {
+            encoded.extend_from_slice(&offset.to_be_bytes());
+        }
+        encoded.extend_from_slice(&(self.offsets.len() as u16).to_be_bytes());
+
+        Bytes::from(encoded)
     }
 
     /// Decode from the data layout, transform the input `data` to a single `Block`
     pub fn decode(data: &[u8]) -> Self {
-        unimplemented!()
+        let data_len = data.len();
+        let num_entries = u16::from_be_bytes(
+            data[data_len - 2..data_len]
+                .try_into()
+                .expect("Slice should be 2 bytes"),
+        );
+        let mut tmp = Vec::with_capacity(num_entries as usize);
+
+        let offset_start = data_len - 2 - 2 * num_entries as usize;
+        let offset_end = data_len - 2;
+
+        tmp.extend_from_slice(&data[offset_start..offset_end]);
+
+        let mut offsets = Vec::new();
+
+        for (i, val) in tmp.iter().enumerate().step_by(2) {
+            let offset = u16::from_be_bytes([tmp[i], tmp[i + 1]]);
+            offsets.push(offset);
+        }
+        let mut decoded_data = Vec::new();
+        decoded_data.extend_from_slice(&data[0..offset_start]);
+
+        Block {
+            data: decoded_data,
+            offsets,
+        }
     }
 }

@@ -48,44 +48,146 @@ impl BlockIterator {
 
     /// Creates a block iterator and seek to the first entry.
     pub fn create_and_seek_to_first(block: Arc<Block>) -> Self {
-        unimplemented!()
+        let data_entry = if block.offsets.len() > 1 {
+            &block.data[block.offsets[0] as usize..block.offsets[1] as usize]
+        } else {
+            &block.data
+        };
+
+        let mut cursor = 0_usize;
+        let key_len = u16::from_be_bytes(
+            data_entry[cursor..cursor + 2]
+                .try_into()
+                .expect("Slice len is less than 2"),
+        );
+
+        cursor += 2;
+        let key = &data_entry[cursor..(cursor + key_len as usize)];
+        cursor += key_len as usize;
+
+        let value_len = u16::from_be_bytes(
+            data_entry[cursor..cursor + 2]
+                .try_into()
+                .expect("Slice len less than 2"),
+        );
+
+        cursor += 2;
+        let value = &data_entry[cursor..(cursor + value_len as usize)];
+        BlockIterator {
+            block: block.clone(),
+            key: KeyVec::from_vec(key.to_vec()),
+            value_range: (cursor, cursor + value_len as usize),
+            idx: 0,
+            first_key: KeyVec::from_vec(key.to_vec()),
+        }
     }
 
     /// Creates a block iterator and seek to the first key that >= `key`.
     pub fn create_and_seek_to_key(block: Arc<Block>, key: KeySlice) -> Self {
-        unimplemented!()
+        let mut iter = Self::new(block);
+        iter.seek_to_key(key);
+        iter
     }
 
     /// Returns the key of the current entry.
     pub fn key(&self) -> KeySlice<'_> {
-        unimplemented!()
+        debug_assert!(!self.key.is_empty(), "invalid iterator");
+        self.key.as_key_slice()
     }
 
     /// Returns the value of the current entry.
     pub fn value(&self) -> &[u8] {
-        unimplemented!()
+        debug_assert!(!self.key.is_empty(), "invalid iterator");
+        &self.block.data[self.value_range.0..self.value_range.1]
     }
 
     /// Returns true if the iterator is valid.
     /// Note: You may want to make use of `key`
     pub fn is_valid(&self) -> bool {
-        unimplemented!()
+        !self.key.is_empty()
     }
 
     /// Seeks to the first key in the block.
     pub fn seek_to_first(&mut self) {
-        unimplemented!()
+        self.seek_to(0);
     }
 
     /// Move to the next key in the block.
     pub fn next(&mut self) {
-        unimplemented!()
+        self.idx += 1;
+        self.seek_to(self.idx);
+    }
+
+    /// Seeks to the idx-th key in the block.
+    fn seek_to(&mut self, idx: usize) {
+        if idx >= self.block.offsets.len() {
+            self.key.clear();
+            self.value_range = (0, 0);
+            return;
+        }
+        let offset = self.block.offsets[idx] as usize;
+        self.seek_to_offset(offset);
+        self.idx = idx;
+    }
+
+    /// Seek to the specified position and update the current `key` and `value`
+    fn seek_to_offset(&mut self, offset: usize) {
+        let data_entry = &self.block.data[offset..];
+        let mut cursor = 0_usize;
+
+        let key_len = u16::from_be_bytes(
+            data_entry[cursor..cursor + 2]
+                .try_into()
+                .expect("Slice len is less than 2"),
+        );
+        cursor += 2;
+
+        let key = &data_entry[cursor..cursor + key_len as usize];
+        cursor += key_len as usize;
+
+        let value_len = u16::from_be_bytes(
+            data_entry[cursor..cursor + 2]
+                .try_into()
+                .expect("Slice len less than 2"),
+        );
+        cursor += 2;
+
+        self.key.clear();
+        self.key.append(key);
+
+        if self.first_key.is_empty() {
+            self.first_key.append(key);
+        }
+
+        let value_start = offset + cursor;
+        self.value_range = (value_start, value_start + value_len as usize);
     }
 
     /// Seek to the first key that >= `key`.
     /// Note: You should assume the key-value pairs in the block are sorted when being added by
     /// callers.
     pub fn seek_to_key(&mut self, key: KeySlice) {
-        unimplemented!()
+        // use binary search to find the key
+        let (mut start, mut end) = (0, self.block.offsets.len());
+        let mut mid;
+        while start < end {
+            mid = (start + end) / 2;
+            self.seek_to(mid);
+            let mid_key = self.key();
+
+            match mid_key.cmp(&key) {
+                std::cmp::Ordering::Less => {
+                    start = mid + 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    end = mid - 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    return;
+                }
+            }
+        }
+
+        self.seek_to(start);
     }
 }
